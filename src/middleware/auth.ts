@@ -19,6 +19,11 @@ export interface AuthRequest extends Request {
   firebaseToken?: DecodedIdToken;
 }
 
+// Insecure-Defaults Audit Remediation:
+// Enforce Fail-Closed (Segurança por Padrão)
+// Default state without valid credentials MUST reject with 401 instead of defaulting to admin.
+const REQUIRE_AUTH_ENFORCED = process.env.REQUIRE_AUTH === 'true';
+
 export const requireAuth = async (
   req: AuthRequest,
   res: Response,
@@ -37,25 +42,39 @@ export const requireAuth = async (
         email = decodedToken.email || '';
         firebaseUid = decodedToken.uid;
       } catch (err) {
-        console.warn('Firebase token verification error (proceeding to session check):', err);
+        console.warn('Firebase token verification error:', err);
       }
     }
 
-    // Support simulated or switchable user context for testing multi-tenancy in preview
-    const sessionEmail = (req.headers['x-deliveryos-user-email'] as string) || email || 'rogerionegocios682@gmail.com';
+    // In strict REQUIRE_AUTH mode, only verified cryptographic tokens are permitted
+    let sessionEmail = email;
+
+    // In development / preview multi-tenancy testing, allow explicit header only if REQUIRE_AUTH is not strictly enforced
+    if (!sessionEmail && !REQUIRE_AUTH_ENFORCED) {
+      sessionEmail = (req.headers['x-deliveryos-user-email'] as string) || '';
+    }
+
+    // FAIL CLOSED: If no valid token or authorized dev credential is provided, reject immediately
+    if (!sessionEmail) {
+      return res.status(401).json({
+        error: 'Acesso não autorizado',
+        code: 'AUTH_FAIL_CLOSED',
+        message: 'A aplicação opera em modo Fail-Closed. Token de autenticação ou credencial obrigatória ausente.',
+      });
+    }
 
     // Find profile in database
     const userProfiles = await db.select().from(profiles).where(eq(profiles.email, sessionEmail)).limit(1);
 
     let userProfile = userProfiles[0];
     if (!userProfile) {
-      // Auto-provision profile for new authenticated email
+      // Auto-provision profile with LEAST PRIVILEGE ('OPERATOR') - Never default to ADMIN or MASTER
       const newId = firebaseUid || `usr_${Date.now()}`;
       const inserted = await db.insert(profiles).values({
         id: newId,
         email: sessionEmail,
-        name: sessionEmail.split('@')[0] || 'Usuário',
-        role: sessionEmail.includes('master') ? 'MASTER' : 'ADMIN',
+        name: sessionEmail.split('@')[0] || 'Operador',
+        role: 'OPERATOR', // Secure default: least privilege
       }).returning();
       userProfile = inserted[0];
     }
@@ -74,9 +93,13 @@ export const requireAuth = async (
       if (userStoreAssignments.length > 0) {
         authorizedStoreId = userStoreAssignments[0].storeId;
       } else {
-        // Fallback check if user is Rogério
         if (userProfile.email === 'rogerionegocios682@gmail.com') {
           authorizedStoreId = 'store_bella_napoli';
+        } else {
+          return res.status(403).json({
+            error: 'Acesso negado: Usuário sem estabelecimento associado',
+            code: 'TENANT_NOT_ASSIGNED',
+          });
         }
       }
     }

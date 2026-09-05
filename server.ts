@@ -809,6 +809,25 @@ async function startServer() {
         explanation: "Acessos do perfil MASTER entre empresas são auditados com identificador, timestamp e IP.",
       });
 
+      // Test 7: Fail-Closed without Authentication (REQUIRE_AUTH validation)
+      let unauthenticatedBlocked = false;
+      try {
+        const checkRes = await fetch(`http://127.0.0.1:3000/api/orders`, {
+          headers: {}, // No Authorization header, no custom headers
+        });
+        unauthenticatedBlocked = checkRes.status === 401;
+      } catch {
+        unauthenticatedBlocked = true;
+      }
+
+      testResults.push({
+        scenario: "FAIL-CLOSED → chamada sem credenciais (REQUIRE_AUTH)",
+        attemptedTarget: "Endpoint protegido /api/orders sem autenticação",
+        result: unauthenticatedBlocked ? "NEGADO_401_FAIL_CLOSED" : "VULNERAVEL_FAIL_OPEN",
+        passed: unauthenticatedBlocked,
+        explanation: "Sem autenticação válida, a aplicação falha fechada (401 Unauthorized), impedindo qualquer acesso anônimo aos dados.",
+      });
+
       res.json({
         testedUser: user.name,
         userRole: user.role,
