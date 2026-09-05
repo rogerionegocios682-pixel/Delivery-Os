@@ -1,0 +1,6 @@
+{
+  "name": "DeliveryOS",
+  "description": "Sistema completo para gestão de motoboys, despacho de corridas, rastreamento, taxas e ranking operacional",
+  "requestFramePermissions": ["geolocation"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
